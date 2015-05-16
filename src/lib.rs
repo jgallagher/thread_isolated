@@ -165,7 +165,7 @@ mod debug {
         THREAD_ID.with(|t| *t)
     }
 
-    #[derive(Copy,Clone)]
+    #[derive(Copy, Clone)]
     pub struct ThreadDebugger {
         thread_id: usize,
     }
@@ -182,15 +182,14 @@ mod debug {
         }
 
         pub fn assert_not_on_originating_thread(&self) {
-            assert!(self.thread_id != our_thread_id(),
-                    "item unexpectedly accessed on owning thread");
+            assert!(self.thread_id != our_thread_id(), "item accessed on owning thread");
         }
     }
 }
 
 #[cfg(not(debug_assertions))]
 mod debug {
-    #[derive(Copy,Clone)]
+    #[derive(Copy, Clone)]
     pub struct ThreadDebugger;
 
     impl ThreadDebugger {
@@ -224,14 +223,14 @@ mod test {
             }
         }
 
-        let (tx, rx) = channel();
+        let (tx_check_done, rx_check_done) = channel();
         let (tx_f, rx_f) = channel();
         let (tx_clone, rx_clone) = channel();
-        let runner = Runner{ tx: Mutex::new(tx_f) };
 
         // start up the owning thread
         let handle = thread::spawn(move|| {
             // create our ThreadIsolated...
+            let runner = Runner{ tx: Mutex::new(tx_f) };
             let t = unsafe { ThreadIsolated::new(0i32, runner) };
 
             // ...and give a non-owning clone back to the test_normal_use thread.
@@ -239,9 +238,9 @@ mod test {
 
             loop {
                 select! (
-                    // If we receive a message on rx, confirm that t has been incremented
-                    // the expected number of times, then exit.
-                    _ = rx.recv() => {
+                    // If we receive a message on rx_check_done, confirm that t has been
+                    // incremented the expected number of times, then exit.
+                    _ = rx_check_done.recv() => {
                         assert_eq!(*t.borrow(), 20);
                         return
                     },
@@ -279,7 +278,7 @@ mod test {
         barrier.wait();
 
         // send the owning thread the message to check that its counter is as expected
-        tx.send(()).unwrap();
+        tx_check_done.send(()).unwrap();
 
         assert!(handle.join().is_ok());
     }
