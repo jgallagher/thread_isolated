@@ -18,23 +18,23 @@ pub trait IsolationRunner: Sync + 'static {
 pub enum OwningThread {}
 pub enum NonOwningThread {}
 
-pub struct ThreadIsolated<T, R: IsolationRunner, ThreadKind> {
-    inner: Arc<Inner<T, R>>,
+pub struct ThreadIsolated<T, ThreadKind> {
+    inner: Arc<Inner<T>>,
     debug: ThreadDebugger,
     _marker: PhantomData<ThreadKind>,
 }
 
-struct Inner<T, R: IsolationRunner> {
+struct Inner<T> {
     item: RefCell<T>,
-    runner: R,
+    runner: Box<IsolationRunner>,
 }
 
-impl<T, R: IsolationRunner> ThreadIsolated<T, R, OwningThread> {
-    pub unsafe fn new(item: T, runner: R) -> ThreadIsolated<T, R, OwningThread> {
+impl<T> ThreadIsolated<T, OwningThread> {
+    pub unsafe fn new<R: IsolationRunner>(item: T, runner: R) -> ThreadIsolated<T, OwningThread> {
         ThreadIsolated{
             inner: Arc::new(Inner{
                 item: RefCell::new(item),
-                runner: runner,
+                runner: Box::new(runner),
             }),
             debug: ThreadDebugger::new(),
             _marker: PhantomData,
@@ -51,7 +51,7 @@ impl<T, R: IsolationRunner> ThreadIsolated<T, R, OwningThread> {
         self.inner.item.borrow_mut()
     }
 
-    pub fn clone_for_non_owning_thread(&self) -> ThreadIsolated<T, R, NonOwningThread> {
+    pub fn clone_for_non_owning_thread(&self) -> ThreadIsolated<T, NonOwningThread> {
         ThreadIsolated{
             inner: self.inner.clone(),
             debug: self.debug,
@@ -59,7 +59,7 @@ impl<T, R: IsolationRunner> ThreadIsolated<T, R, OwningThread> {
         }
     }
 
-    pub fn downgrade_for_non_owning_thread(&self) -> ThreadIsolatedWeak<T, R> {
+    pub fn downgrade_for_non_owning_thread(&self) -> ThreadIsolatedWeak<T> {
         ThreadIsolatedWeak{
             inner: self.inner.downgrade(),
             debug: self.debug,
@@ -67,8 +67,8 @@ impl<T, R: IsolationRunner> ThreadIsolated<T, R, OwningThread> {
     }
 }
 
-impl<T, R: IsolationRunner> ThreadIsolated<T, R, NonOwningThread> {
-    pub unsafe fn as_owning_thread(self) -> ThreadIsolated<T, R, OwningThread> {
+impl<T> ThreadIsolated<T, NonOwningThread> {
+    pub unsafe fn as_owning_thread(self) -> ThreadIsolated<T, OwningThread> {
         self.debug.assert_on_originating_thread();
         ThreadIsolated{
             inner: self.inner,
@@ -116,8 +116,8 @@ impl<T, R: IsolationRunner> ThreadIsolated<T, R, NonOwningThread> {
     }
 }
 
-impl<T, R: IsolationRunner> Clone for ThreadIsolated<T, R, NonOwningThread> {
-    fn clone(&self) -> ThreadIsolated<T, R, NonOwningThread> {
+impl<T> Clone for ThreadIsolated<T, NonOwningThread> {
+    fn clone(&self) -> ThreadIsolated<T, NonOwningThread> {
         ThreadIsolated{
             inner: self.inner.clone(),
             debug: self.debug,
@@ -126,16 +126,16 @@ impl<T, R: IsolationRunner> Clone for ThreadIsolated<T, R, NonOwningThread> {
     }
 }
 
-unsafe impl<T, R: IsolationRunner> Send for ThreadIsolated<T, R, NonOwningThread> {}
-unsafe impl<T, R: IsolationRunner> Sync for ThreadIsolated<T, R, NonOwningThread> {}
+unsafe impl<T> Send for ThreadIsolated<T, NonOwningThread> {}
+unsafe impl<T> Sync for ThreadIsolated<T, NonOwningThread> {}
 
-pub struct ThreadIsolatedWeak<T, R: IsolationRunner> {
-    inner: Weak<Inner<T, R>>,
+pub struct ThreadIsolatedWeak<T> {
+    inner: Weak<Inner<T>>,
     debug: ThreadDebugger,
 }
 
-impl<T, R: IsolationRunner> ThreadIsolatedWeak<T, R> {
-    pub fn upgrade(&self) -> Option<ThreadIsolated<T, R, NonOwningThread>> {
+impl<T> ThreadIsolatedWeak<T> {
+    pub fn upgrade(&self) -> Option<ThreadIsolated<T, NonOwningThread>> {
         self.inner.upgrade().map(|inner| {
             ThreadIsolated{
                 inner: inner,
@@ -146,8 +146,8 @@ impl<T, R: IsolationRunner> ThreadIsolatedWeak<T, R> {
     }
 }
 
-unsafe impl<T, R: IsolationRunner> Send for ThreadIsolatedWeak<T, R> {}
-unsafe impl<T, R: IsolationRunner> Sync for ThreadIsolatedWeak<T, R> {}
+unsafe impl<T> Send for ThreadIsolatedWeak<T> {}
+unsafe impl<T> Sync for ThreadIsolatedWeak<T> {}
 
 #[cfg(debug_assertions)]
 mod debug {
