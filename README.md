@@ -2,6 +2,8 @@
 
 [![Build Status](https://api.travis-ci.org/jgallagher/thread_isolated.svg?branch=master)](https://travis-ci.org/jgallagher/thread_isolated)
 
+[API Documentation](http://jgallagher.github.io/thread_isolated/thread_isolated/index.html)
+
 ThreadIsolated is an experimental library for allowing non-`Send`, non-`Sync` types to be
 shared among multiple threads by requiring that they only be accessed on the thread that
 created and owns them. Other threads can indirectly access the isolated data by supplying a
