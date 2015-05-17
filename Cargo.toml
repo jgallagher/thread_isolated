@@ -2,3 +2,8 @@
 name = "thread_isolated"
 version = "0.1.0"
 authors = ["John Gallagher <jgallagher@bignerdranch.com>"]
+description = "Isolating values allowing access via closures run on an owning thread"
+repository = "https://github.com/jgallagher/thread_isolated"
+documentation = "http://jgallagher.github.io/thread_isolated/thread_isolated/index.html"
+readme = "README.md"
+license = "MIT"
