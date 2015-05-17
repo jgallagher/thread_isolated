@@ -1,9 +1,25 @@
+//! ThreadIsolated is an experimental library for allowing non-`Send`, non-`Sync` types to be
+//! shared among multiple threads by requiring that they only be accessed on the thread that
+//! created and owns them. Other threads can indirectly access the isolated data by supplying a
+//! closure that will be run on the owning thread.
+//!
+//! The value of ThreadIsolated in a pure Rust application is probably pretty limited (maybe even
+//! completely useless). The original motivation for the type is to use Rust on iOS, where it is
+//! common to have instances that are only safe to be accessed on the iOS main thread.  Using
+//! ThreadIsolated gives Rust a way to have types that are only accessed on the iOS main thread but
+//! can still be used (albeit indirectly) from threads created in Rust.
+//!
+//! In debug builds, `ThreadIsolated` will use thread-local storage and perform runtime checks that
+//! all thread access obeys the expected rules. In release builds these checks are not performed.
+//!
+//! For an example of ThreadIsolated in pure Rust code, see the `test_normal_use` function in the
+//! `test` module of `src/lib.rs`.
 #![feature(alloc)]
 #![feature(core)]
 #![cfg_attr(test, feature(std_misc))]
 
 use std::boxed::FnBox;
-use std::cell::{Ref, RefMut, RefCell};
+use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::mem;
 use std::sync::{Arc, Weak};
@@ -11,13 +27,24 @@ use std::sync::mpsc::sync_channel;
 
 use self::debug::ThreadDebugger;
 
+pub use std::cell::{Ref, RefMut};
+
+/// A type that can run a given boxed closure on a particular thread.
 pub trait IsolationRunner: Sync + 'static {
     fn run_on_owning_thread(&self, f: Box<FnBox() + Send>);
 }
 
+/// Phantom type indicating a `ThreadIsolated` on its owning thread.
 pub enum OwningThread {}
+
+/// Phantom type indicating a `ThreadIsolated` on a thread other than its owning thread.
 pub enum NonOwningThread {}
 
+/// A reference-counted `RefCell<T>` exposed in two different ways, depending on the `ThreadKind`
+/// phantom type.
+///
+/// * `ThreadIsolated<T, OwningThread>` allows direct access via `borrow()` and `borrow_mut()`.
+/// * `ThreadIsolated<T, NonOwningThread>` allows indirect access via `with()`.
 pub struct ThreadIsolated<T, ThreadKind> {
     inner: Arc<Inner<T>>,
     debug: ThreadDebugger,
@@ -30,6 +57,11 @@ struct Inner<T> {
 }
 
 impl<T> ThreadIsolated<T, OwningThread> {
+    /// Create a new thread-isolated value. The given runner's implementation must run any closures
+    /// it is given on the thread currently calling `new`.
+    ///
+    /// Function is unsafe because if the runner does not run closures on the current thread,
+    /// memory unsafety will occur.
     pub unsafe fn new<R: IsolationRunner>(item: T, runner: R) -> ThreadIsolated<T, OwningThread> {
         ThreadIsolated{
             inner: Arc::new(Inner{
@@ -41,16 +73,34 @@ impl<T> ThreadIsolated<T, OwningThread> {
         }
     }
 
+    /// Immutably borrows the wrapped value.
+    ///
+    /// The borrow lasts until the returned `Ref` exits scope. Multiple immutable borrows can be
+    /// taken out at the same time.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value is currently mutably borrowed.
     pub fn borrow(&self) -> Ref<T> {
         self.debug.assert_on_originating_thread();
         self.inner.item.borrow()
     }
 
+    /// Mutably borrows the wrapped value.
+    ///
+    /// The borrow lasts until the returned `RefMut` exits scope. The value cannot be borrowed
+    /// while this borrow is active.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the value is currently borrowed.
     pub fn borrow_mut(&self) -> RefMut<T> {
         self.debug.assert_on_originating_thread();
         self.inner.item.borrow_mut()
     }
 
+    /// Clones the contained `RefCell` into a `ThreadIsolated<T, NonOwningThread>` that can be sent
+    /// and shared with other threads.
     pub fn clone_for_non_owning_thread(&self) -> ThreadIsolated<T, NonOwningThread> {
         ThreadIsolated{
             inner: self.inner.clone(),
@@ -59,6 +109,7 @@ impl<T> ThreadIsolated<T, OwningThread> {
         }
     }
 
+    /// Downgreads the `ThreadIsolated<T, OwningThread>` to a `ThreadIsolatedWeak<T>`.
     pub fn downgrade_for_non_owning_thread(&self) -> ThreadIsolatedWeak<T> {
         ThreadIsolatedWeak{
             inner: self.inner.downgrade(),
@@ -68,6 +119,11 @@ impl<T> ThreadIsolated<T, OwningThread> {
 }
 
 impl<T> ThreadIsolated<T, NonOwningThread> {
+    /// Convert a `ThreadIsolated<T, NonOwningThread>` into a `ThreadIsolated<T, OwningThread>`.
+    ///
+    /// Function is unsafe because the returned `ThreadIsolated` is only safe to access from the
+    /// thread that created the original `ThreadIsolated<T, OwningThread>` from which this instance
+    /// was cloned.
     pub unsafe fn as_owning_thread(self) -> ThreadIsolated<T, OwningThread> {
         self.debug.assert_on_originating_thread();
         ThreadIsolated{
@@ -77,6 +133,10 @@ impl<T> ThreadIsolated<T, NonOwningThread> {
         }
     }
 
+    /// Run a closure that has access to the contained `RefCell` on the original owning thread.
+    ///
+    /// This function blocks until the original thread has run `f`. This means (among other things)
+    /// that `with` will deadlock if you call it from the thread that owns the underlying value.
     pub fn with<U, F>(&self, f: F) -> U where
         F: FnOnce(&RefCell<T>) -> U + Send,
         U: Send,
@@ -129,12 +189,16 @@ impl<T> Clone for ThreadIsolated<T, NonOwningThread> {
 unsafe impl<T> Send for ThreadIsolated<T, NonOwningThread> {}
 unsafe impl<T> Sync for ThreadIsolated<T, NonOwningThread> {}
 
+/// A weak reference to a `ThreadIsolated` value.
 pub struct ThreadIsolatedWeak<T> {
     inner: Weak<Inner<T>>,
     debug: ThreadDebugger,
 }
 
 impl<T> ThreadIsolatedWeak<T> {
+    /// Upgrades a weak reference to a strong reference.
+    ///
+    /// Returns `None` if there were no strong references and the data was destroyed.
     pub fn upgrade(&self) -> Option<ThreadIsolated<T, NonOwningThread>> {
         self.inner.upgrade().map(|inner| {
             ThreadIsolated{
