@@ -1,6 +1,6 @@
 [package]
 name = "thread_isolated"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["John Gallagher <jgallagher@bignerdranch.com>"]
 description = "Isolating values allowing access via closures run on an owning thread"
 repository = "https://github.com/jgallagher/thread_isolated"

@@ -14,14 +14,14 @@
 //!
 //! For an example of ThreadIsolated in pure Rust code, see the `test_normal_use` function in the
 //! `test` module of `src/lib.rs`.
-#![feature(alloc)]
-#![feature(core)]
-#![cfg_attr(test, feature(std_misc))]
+#![feature(fnbox)]
+#![cfg_attr(test, feature(mpsc_select))]
 
 use std::boxed::FnBox;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::mem;
+use std::process;
 use std::sync::{Arc, Weak};
 use std::sync::mpsc::sync_channel;
 
@@ -112,7 +112,7 @@ impl<T> ThreadIsolated<T, OwningThread> {
     /// Downgreads the `ThreadIsolated<T, OwningThread>` to a `ThreadIsolatedWeak<T>`.
     pub fn downgrade_for_non_owning_thread(&self) -> ThreadIsolatedWeak<T> {
         ThreadIsolatedWeak{
-            inner: self.inner.downgrade(),
+            inner: Arc::downgrade(&self.inner),
             debug: self.debug,
         }
     }
@@ -170,7 +170,7 @@ impl<T> ThreadIsolated<T, NonOwningThread> {
             Ok(u) => u,
             Err(err) => {
                 println!("recv() failed: {}", err);
-                unsafe { std::intrinsics::abort(); }
+                process::exit(1);
             }
         }
     }
