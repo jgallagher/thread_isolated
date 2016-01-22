@@ -63,8 +63,8 @@ impl<T> ThreadIsolated<T, OwningThread> {
     /// Function is unsafe because if the runner does not run closures on the current thread,
     /// memory unsafety will occur.
     pub unsafe fn new<R: IsolationRunner>(item: T, runner: R) -> ThreadIsolated<T, OwningThread> {
-        ThreadIsolated{
-            inner: Arc::new(Inner{
+        ThreadIsolated {
+            inner: Arc::new(Inner {
                 item: RefCell::new(item),
                 runner: Box::new(runner),
             }),
@@ -102,7 +102,7 @@ impl<T> ThreadIsolated<T, OwningThread> {
     /// Clones the contained `RefCell` into a `ThreadIsolated<T, NonOwningThread>` that can be sent
     /// and shared with other threads.
     pub fn clone_for_non_owning_thread(&self) -> ThreadIsolated<T, NonOwningThread> {
-        ThreadIsolated{
+        ThreadIsolated {
             inner: self.inner.clone(),
             debug: self.debug,
             _marker: PhantomData,
@@ -111,7 +111,7 @@ impl<T> ThreadIsolated<T, OwningThread> {
 
     /// Downgreads the `ThreadIsolated<T, OwningThread>` to a `ThreadIsolatedWeak<T>`.
     pub fn downgrade_for_non_owning_thread(&self) -> ThreadIsolatedWeak<T> {
-        ThreadIsolatedWeak{
+        ThreadIsolatedWeak {
             inner: Arc::downgrade(&self.inner),
             debug: self.debug,
         }
@@ -126,7 +126,7 @@ impl<T> ThreadIsolated<T, NonOwningThread> {
     /// was cloned.
     pub unsafe fn as_owning_thread(self) -> ThreadIsolated<T, OwningThread> {
         self.debug.assert_on_originating_thread();
-        ThreadIsolated{
+        ThreadIsolated {
             inner: self.inner,
             debug: self.debug,
             _marker: PhantomData,
@@ -137,15 +137,15 @@ impl<T> ThreadIsolated<T, NonOwningThread> {
     ///
     /// This function blocks until the original thread has run `f`. This means (among other things)
     /// that `with` will deadlock if you call it from the thread that owns the underlying value.
-    pub fn with<U, F>(&self, f: F) -> U where
-        F: FnOnce(&RefCell<T>) -> U + Send,
-        U: Send,
+    pub fn with<U, F>(&self, f: F) -> U
+        where F: FnOnce(&RefCell<T>) -> U + Send,
+              U: Send
     {
         self.debug.assert_not_on_originating_thread();
 
         let (tx, rx) = sync_channel(1);
 
-        let closure: Box<FnBox() + Send> = Box::new(move|| {
+        let closure: Box<FnBox() + Send> = Box::new(move || {
             self.debug.assert_on_originating_thread();
             let u = f(&self.inner.item);
             tx.send(u).unwrap();
@@ -178,7 +178,7 @@ impl<T> ThreadIsolated<T, NonOwningThread> {
 
 impl<T> Clone for ThreadIsolated<T, NonOwningThread> {
     fn clone(&self) -> ThreadIsolated<T, NonOwningThread> {
-        ThreadIsolated{
+        ThreadIsolated {
             inner: self.inner.clone(),
             debug: self.debug,
             _marker: PhantomData,
@@ -201,7 +201,7 @@ impl<T> ThreadIsolatedWeak<T> {
     /// Returns `None` if there were no strong references and the data was destroyed.
     pub fn upgrade(&self) -> Option<ThreadIsolated<T, NonOwningThread>> {
         self.inner.upgrade().map(|inner| {
-            ThreadIsolated{
+            ThreadIsolated {
                 inner: inner,
                 debug: self.debug,
                 _marker: PhantomData,
@@ -236,17 +236,17 @@ mod debug {
 
     impl ThreadDebugger {
         pub fn new() -> ThreadDebugger {
-            ThreadDebugger{
-                thread_id: our_thread_id(),
-            }
+            ThreadDebugger { thread_id: our_thread_id() }
         }
 
         pub fn assert_on_originating_thread(&self) {
-            assert!(self.thread_id == our_thread_id(), "item accessed off of owning thread");
+            assert!(self.thread_id == our_thread_id(),
+                    "item accessed off of owning thread");
         }
 
         pub fn assert_not_on_originating_thread(&self) {
-            assert!(self.thread_id != our_thread_id(), "item accessed on owning thread");
+            assert!(self.thread_id != our_thread_id(),
+                    "item accessed on owning thread");
         }
     }
 }
@@ -257,7 +257,9 @@ mod debug {
     pub struct ThreadDebugger;
 
     impl ThreadDebugger {
-        pub fn new() -> ThreadDebugger { ThreadDebugger }
+        pub fn new() -> ThreadDebugger {
+            ThreadDebugger
+        }
         pub fn assert_on_originating_thread(&self) {}
         pub fn assert_not_on_originating_thread(&self) {}
     }
@@ -292,9 +294,9 @@ mod test {
         let (tx_clone, rx_clone) = channel();
 
         // start up the owning thread
-        let handle = thread::spawn(move|| {
+        let handle = thread::spawn(move || {
             // create our ThreadIsolated...
-            let runner = Runner{ tx: Mutex::new(tx_f) };
+            let runner = Runner { tx: Mutex::new(tx_f) };
             let t = unsafe { ThreadIsolated::new(0i32, runner) };
 
             // ...and give a non-owning clone back to the test_normal_use thread.
@@ -321,10 +323,10 @@ mod test {
         // owned by the thread above twice.
         let barrier = Arc::new(Barrier::new(11));
         let non_owning_t = rx_clone.recv().unwrap();
-        for _ in 0 .. 10 {
+        for _ in 0..10 {
             let b = barrier.clone();
             let t = non_owning_t.clone();
-            thread::spawn(move|| {
+            thread::spawn(move || {
                 let t2 = t.clone();
                 t.with(|refcell| {
                     *refcell.borrow_mut() += 1;
@@ -351,7 +353,7 @@ mod test {
     mod debug_tests {
         use std::thread;
         use std::boxed::FnBox;
-        use ::{IsolationRunner, ThreadIsolated};
+        use {IsolationRunner, ThreadIsolated};
 
         struct UnsafeNoopRunner;
 
@@ -363,7 +365,7 @@ mod test {
 
         #[test]
         fn test_accessing_nonowning_value_from_owning_thread_panics() {
-            let handle = thread::spawn(move|| {
+            let handle = thread::spawn(move || {
                 let t = unsafe { ThreadIsolated::new(0i32, UnsafeNoopRunner) };
                 let t2 = t.clone_for_non_owning_thread();
 
@@ -380,7 +382,7 @@ mod test {
             let t = unsafe { ThreadIsolated::new(0i32, UnsafeNoopRunner) };
             let t2 = t.clone_for_non_owning_thread();
 
-            let handle = thread::spawn(move|| {
+            let handle = thread::spawn(move || {
                 t2.with(|t| {
                     *t.borrow_mut() = 1;
                 });
@@ -394,7 +396,7 @@ mod test {
             let t = unsafe { ThreadIsolated::new(0i32, UnsafeNoopRunner) };
             let t2 = t.clone_for_non_owning_thread();
 
-            let handle = thread::spawn(move|| {
+            let handle = thread::spawn(move || {
                 let _ = unsafe { t2.as_owning_thread() };
             });
 
